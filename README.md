@@ -1,6 +1,6 @@
 # meet_recordings_converter
 
-Google Meet の録画を NotebookLM のノートブックに取り込むための Ruby スクリプト集です。
+Google Meet の録画を Podcast として配信するためのパイプラインを構成する Ruby スクリプト集です。録画動画の MP3 変換、Podcast 公開向けのマスタリング、NotebookLM へのノートブック作成とエピソードメタデータ生成、Cloudflare R2 にホスティングした RSS フィード経由での Spotify for Creators 等への配信までを一通りカバーします。
 
 ## スクリプト
 
