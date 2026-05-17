@@ -1,0 +1,25 @@
+# publish_to_spotify.rb の設定ファイル
+#
+# このファイルを `podcast.yml` にコピーして実環境の値を埋めてください。
+# `podcast.yml` は `.gitignore` で除外されています。
+
+# Cloudflare R2 バケット
+r2:
+  account_id: "<R2 アカウント ID>"
+  bucket: "<バケット名>"
+  # MP3 と feed.xml をアップロードする際のキー prefix（空文字なら直下）
+  key_prefix: "podcast/"
+  # 公開 URL のベース。r2.dev URL もしくはカスタムドメイン。
+  # 例: https://pub-xxxxxxxxxxxx.r2.dev
+  public_base_url: "<https://pub-xxxxxxxxxxxx.r2.dev>"
+
+# 既存 RSS フィードの URL（--bootstrap で取得元として使用）
+existing_rss_url: "<https://anchor.fm/s/.../podcast.rss>"
+
+# 予約公開のデフォルト
+schedule:
+  # 通常モードで複数 MP3 をまとめて投入する際の最初のエピソードの公開日時
+  # 各エピソードはこの日時から `interval_days` ずつずらして配信されます。
+  # CLI で --start-date / --interval-days を渡すと上書きできます。
+  start_date: "2026-05-15T07:00:00+09:00"
+  interval_days: 7
