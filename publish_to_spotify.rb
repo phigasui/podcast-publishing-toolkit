@@ -369,6 +369,24 @@ def run_bootstrap(config)
   puts "Local copy: #{File.expand_path(local)}"
 end
 
+def run_publish_feed(config)
+  local = DEFAULT_LOCAL_FEED_PATH
+  unless File.file?(local)
+    warn "Error: #{local} not found."
+    warn 'Run a publish step (with --no-publish to stage) before --publish-feed.'
+    exit 1
+  end
+
+  feed_key = r2_key(config, FEED_KEY_NAME)
+  puts "Uploading #{local} to s3://#{config.dig('r2', 'bucket')}/#{feed_key} ..."
+  unless r2_upload(local, feed_key, config, content_type: 'application/rss+xml; charset=utf-8')
+    warn 'Failed to upload feed.xml.'
+    exit 1
+  end
+
+  puts "Feed URL: #{r2_public_url(config, FEED_KEY_NAME)}"
+end
+
 def fetch_current_feed(config, local)
   feed_key = r2_key(config, FEED_KEY_NAME)
   unless r2_object_exists?(feed_key, config)
@@ -503,13 +521,19 @@ def run_publish(mp3_dir, config, options)
 
   if added.positive? && !options[:dry_run]
     write_feed(doc, local_feed)
-    feed_key = r2_key(config, FEED_KEY_NAME)
-    puts "Uploading updated feed.xml to #{feed_key} ..."
-    unless r2_upload(local_feed, feed_key, config, content_type: 'application/rss+xml; charset=utf-8')
-      warn 'Failed to upload feed.xml. Local copy retained.'
-      exit 1
+    if options[:no_publish]
+      puts "Staged #{added} item(s) in #{File.expand_path(local_feed)} (feed.xml NOT uploaded)."
+      puts 'Review/edit titles and descriptions, then publish with:'
+      puts "  ruby #{$PROGRAM_NAME} --publish-feed"
+    else
+      feed_key = r2_key(config, FEED_KEY_NAME)
+      puts "Uploading updated feed.xml to #{feed_key} ..."
+      unless r2_upload(local_feed, feed_key, config, content_type: 'application/rss+xml; charset=utf-8')
+        warn 'Failed to upload feed.xml. Local copy retained.'
+        exit 1
+      end
+      puts "Feed URL: #{r2_public_url(config, FEED_KEY_NAME)}"
     end
-    puts "Feed URL: #{r2_public_url(config, FEED_KEY_NAME)}"
   elsif options[:dry_run]
     puts '(dry-run: feed.xml not modified)'
   end
@@ -523,12 +547,16 @@ end
 
 def parse_cli_args
   args = ARGV.dup
-  opts = { bootstrap: false, dry_run: false }
+  opts = { bootstrap: false, dry_run: false, no_publish: false, publish_feed: false }
 
   while (arg = args.shift)
     case arg
     when '--bootstrap'
       opts[:bootstrap] = true
+    when '--publish-feed'
+      opts[:publish_feed] = true
+    when '--no-publish'
+      opts[:no_publish] = true
     when '--dry-run'
       opts[:dry_run] = true
     when '--start-date'
@@ -554,7 +582,8 @@ def print_usage
   puts <<~USAGE
     Usage:
       ruby #{$PROGRAM_NAME} --bootstrap [--config podcast.yml] [--env .env]
-      ruby #{$PROGRAM_NAME} <MP3_DIR> [--start-date <ISO8601>] [--interval-days <N>] [--dry-run]
+      ruby #{$PROGRAM_NAME} <MP3_DIR> [--start-date <ISO8601>] [--interval-days <N>] [--dry-run] [--no-publish]
+      ruby #{$PROGRAM_NAME} --publish-feed
 
     Bootstrap mode:
       既存 RSS を取得してそのまま feed.xml として R2 にアップロードします。
@@ -567,6 +596,14 @@ def print_usage
       --start-date    最初のエピソードの公開日時 (ISO8601)。省略時は podcast.yml の値。
       --interval-days 連続投入時のエピソード間隔日数。省略時は podcast.yml の値か 7。
       --dry-run       アップロードや feed.xml 更新を行わず内容を表示するのみ。
+      --no-publish    MP3 アップロードとローカル feed.xml への追記まで行い、
+                      feed.xml の R2 アップロードはスキップします (公開前レビュー用)。
+                      レビュー・修正後に --publish-feed で公開してください。
+
+    Publish-feed mode:
+      ローカルの feed.xml をそのまま R2 にアップロードして公開します。
+      --no-publish でステージしたフィードのタイトル・説明を手で修正したあと、
+      この モードで公開する 2 段階フローを想定しています。
   USAGE
 end
 
@@ -579,6 +616,11 @@ def main
 
   if opts[:bootstrap]
     run_bootstrap(config)
+    return
+  end
+
+  if opts[:publish_feed]
+    run_publish_feed(config)
     return
   end
 

@@ -109,6 +109,25 @@ ruby publish_to_spotify.rb ./mastered \
 
 `--dry-run` を付けるとアップロードや `feed.xml` 更新を行わず、追加予定のタイトル・公開日時・MP3 URL のみ表示します。
 
+#### 公開前レビュー（タイトル・説明の修正フロー）
+
+NotebookLM が生成したタイトルや説明を公開前に確認・修正したい場合は、`--no-publish` でステージしてから `--publish-feed` で公開する 2 段階に分けます。
+
+```sh
+# 1. ステージ: MP3 アップロードとローカル feed.xml への追記まで行い、公開はしない
+ruby publish_to_spotify.rb ./mastered --no-publish
+
+# 2. レビュー: ローカルの feed.xml を開き、タイトル・説明を直接修正
+
+# 3. 公開: ローカルの feed.xml をそのまま R2 にアップロード
+ruby publish_to_spotify.rb --publish-feed
+```
+
+注意点:
+
+- `--no-publish` のステージ時点で MP3 は R2 にアップロードされます（公開 URL は `feed.xml` が公開されるまで参照されないため実害はありませんが、エピソードを取りやめた場合は R2 上に未参照の MP3 が残ります）。
+- `--no-publish` は実行のたびに R2 から最新の `feed.xml` を再取得して上書きします。**ステージ後に手で修正したら、再度 `--no-publish` を実行せずに `--publish-feed` へ進んでください**（修正が失われます）。
+
 ## 典型的なワークフロー
 
 1. Google Drive から Meet の録画（mp4）をダウンロード
@@ -116,4 +135,6 @@ ruby publish_to_spotify.rb ./mastered \
 3. `ruby master_for_podcast.rb ./mp3s ./mastered`
 4. `ruby create_notebooklm_notebooks.rb ./mastered`
 5. （初回のみ）`ruby publish_to_spotify.rb --bootstrap` → Spotify for Creators で RSS URL を差し替え
-6. `ruby publish_to_spotify.rb ./mastered --start-date <YYYY-MM-DDTHH:MM:SS+09:00>`
+6. `ruby publish_to_spotify.rb ./mastered --start-date <YYYY-MM-DDTHH:MM:SS+09:00> --no-publish`（ステージ）
+7. ローカルの `feed.xml` でタイトル・説明をレビュー・修正
+8. `ruby publish_to_spotify.rb --publish-feed`（公開）
