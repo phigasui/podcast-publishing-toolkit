@@ -2,6 +2,29 @@
 
 Google Meet の録画を Podcast として配信するためのパイプラインを構成する Ruby スクリプト集です。録画動画の MP3 変換、Podcast 公開向けのマスタリング、NotebookLM へのノートブック作成とエピソードメタデータ生成、Cloudflare R2 にホスティングした RSS フィード経由での Spotify for Creators 等への配信までを一通りカバーします。
 
+## 構成図
+
+```mermaid
+flowchart TD
+    drive[("Google Drive<br/>Meet 録画 (mp4)")]
+    drive -->|ダウンロード| videos[/"./videos"/]
+
+    videos --> convert["convert_meet_recordings.rb<br/>(ffmpeg)"]
+    convert --> mp3s[/"./mp3s (MP3)"/]
+
+    mp3s --> master["master_for_podcast.rb<br/>(ffmpeg: silenceremove / acompressor / loudnorm)"]
+    master --> mastered[/"./mastered (マスタリング済み MP3)"/]
+
+    mastered --> notebook["create_notebooklm_notebooks.rb<br/>(nlm CLI)"]
+    notebook --> nlm[("NotebookLM<br/>ノートブック")]
+    nlm -.-> meta["Podcast 公開用メタデータ<br/>カット希望箇所チェック"]
+
+    mastered --> publish["publish_to_spotify.rb<br/>(aws / curl / ffprobe / nlm)"]
+    meta -.->|タイトル・説明を参照| publish
+    publish -->|MP3 + feed.xml をアップロード| r2[("Cloudflare R2")]
+    r2 -->|RSS フィード| spotify(["Spotify for Creators 等<br/>Podcast プラットフォーム"])
+```
+
 ## スクリプト
 
 ### `convert_meet_recordings.rb`
@@ -45,6 +68,7 @@ ruby master_for_podcast.rb <SOURCE_DIR> <DEST_DIR>
 - いずれかのノートブックに同じファイル名のオーディオソースが既に存在する MP3 はスキップします。
 - 過去の失敗で残った空のノートブックがある場合は再利用し、ソースの追加のみリトライします。
 - ソース追加に成功すると、Podcast 公開用のエピソードタイトルとエピソード説明を NotebookLM に生成させ、ノートブック内に「Podcast 公開用メタデータ」というノートとして保存します（標準出力にも表示します）。
+- 続けて、録音内に「ここはカットしてほしい」など特定箇所の削除を依頼している発言がないかを NotebookLM にチェックさせ、結果を「カット希望箇所チェック」というノートとして保存します（標準出力にも表示します）。該当が無ければその旨が記録されます。
 
 ```sh
 ruby create_notebooklm_notebooks.rb <MP3_DIRECTORY>
@@ -54,7 +78,7 @@ ruby create_notebooklm_notebooks.rb <MP3_DIRECTORY>
 
 #### Backfill モード
 
-`--backfill` を付けると、ノートブックの新規作成やソース追加は行わず、既に取り込み済みの MP3 のうち「Podcast 公開用メタデータ」ノートが未作成のものに対してのみメタデータを生成・保存します。古いノートブックへの後追い生成に利用します。
+`--backfill` を付けると、ノートブックの新規作成やソース追加は行わず、既に取り込み済みの MP3 を対象に「Podcast 公開用メタデータ」ノートと「カット希望箇所チェック」ノートのうち未作成のものだけを生成・保存します。古いノートブックへの後追い生成に利用します。
 
 ```sh
 ruby create_notebooklm_notebooks.rb --backfill <MP3_DIRECTORY>
