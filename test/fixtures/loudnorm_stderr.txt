@@ -1,0 +1,17 @@
+ffmpeg version 7.0 Copyright (c) 2000-2024 the FFmpeg developers
+  Input #0, mp3, from 'input.mp3':
+[Parsed_loudnorm_0 @ 0x600001] Some log line with a brace { that is not JSON
+  Stream #0:0: Audio: mp3
+[Parsed_loudnorm_0 @ 0x600001]
+{
+	"input_i" : "-27.34",
+	"input_tp" : "-11.87",
+	"input_lra" : "5.10",
+	"input_thresh" : "-37.55",
+	"output_i" : "-23.01",
+	"output_tp" : "-2.00",
+	"output_lra" : "5.00",
+	"output_thresh" : "-33.22",
+	"normalization_type" : "dynamic",
+	"target_offset" : "0.01"
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:content='http://purl.org/rss/1.0/modules/content/' xmlns:itunes='http://www.itunes.com/dtds/podcast-1.0.dtd' version='2.0'>
+  <channel>
+    <title>Test Podcast</title>
+    <description>A test channel</description>
+    <link>https://example.com</link>
+    <item><title><![CDATA[New & Shiny <Episode>]]></title><description><![CDATA[Line one
+Line two with [brackets]]]></description><pubDate>Sun, 01 Feb 2026 09:00:00 +0900</pubDate><guid isPermaLink='false'>new episode.mp3</guid><enclosure length='12345' type='audio/mpeg' url='https://ex.com/new%20episode.mp3'/><itunes:duration>01:01:01</itunes:duration><itunes:summary><![CDATA[Line one
+Line two with [brackets]]]></itunes:summary><itunes:explicit>false</itunes:explicit></item><item>
+      <title>Existing Episode</title>
+      <description>Already here</description>
+      <guid isPermaLink='false'>existing.mp3</guid>
+    </item>
+  </channel>
+</rss>

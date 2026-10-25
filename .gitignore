@@ -1,3 +1,7 @@
 podcast.yml
 .env
 feed.xml
+
+# Bundler-installed gems (path may be set to vendor/ via bundle config)
+/vendor/
+/.bundle/

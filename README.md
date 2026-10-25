@@ -12,7 +12,7 @@ flowchart TD
     videos --> convert["convert_meet_recordings.rb<br/>(ffmpeg)"]
     convert --> mp3s[/"./mp3s (MP3)"/]
 
-    mp3s --> master["master_for_podcast.rb<br/>(ffmpeg: silenceremove / acompressor / loudnorm)"]
+    mp3s --> master["master_for_podcast.rb<br/>(ffmpeg: silencedetect+concat / acompressor / loudnorm)"]
     master --> mastered[/"./mastered (マスタリング済み MP3)"/]
 
     mastered --> notebook["create_notebooklm_notebooks.rb<br/>(nlm CLI)"]
@@ -46,8 +46,9 @@ Audacity で行っていた Podcast 公開向けのマスタリング処理を `
 
 適用する処理は次の 3 つで、Audacity の現設定値に合わせています。
 
-- Truncate Silence: しきい値 `-35dB`、1 秒以上の無音を `0.5` 秒に短縮 (`silenceremove`)
-  - Audacity と `silenceremove` は実装差があり、同じ `-25dB` だと子音や息継ぎが誤判定されやすかったため、ffmpeg 側では少し低い `-35dB` にしています。
+- Truncate Silence: しきい値 `-35dB`、1.5 秒以上の無音を `1.0` 秒に短縮 (`silencedetect` + `atrim`/`afade`/`concat`)
+  - `silenceremove` は境界にフェードを入れずクリックノイズが出やすいため不採用。`silencedetect` で無音区間を検出し、`atrim` + `afade` + `concat` で切り貼りすることで、Audacity 同様にカット境界へ短いフェード（5ms）を入れています。
+  - Audacity と実装差があり、同じ `-25dB` だと子音や息継ぎが誤判定されやすかったため、ffmpeg 側では少し低い `-35dB` にしています。
 - Compressor: threshold `-10dB`, ratio `10`, knee `5dB`, attack `30ms`, release `150ms`, makeup `0dB` (`acompressor`)
   - Audacity の Lookahead `1ms` は `acompressor` に対応するパラメータがないため省略しています。
 - Loudness Normalization: `-23 LUFS` (EBU R128) を **2-pass** で精密適用 (`loudnorm`)

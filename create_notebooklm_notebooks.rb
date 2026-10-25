@@ -3,6 +3,8 @@
 require 'open3'
 require 'json'
 require 'uri'
+require 'set'
+require_relative 'lib/podcast_toolkit/nlm'
 
 WAIT_TIMEOUT = 1200
 SLEEP_BETWEEN = 2
@@ -10,7 +12,7 @@ SLEEP_AFTER_FAILURE = 30
 QUERY_TIMEOUT = 180
 QUERY_MAX_RETRIES = 5
 SLEEP_BETWEEN_RETRIES = 5
-PODCAST_NOTE_TITLE = "Podcast 公開用メタデータ"
+PODCAST_NOTE_TITLE = PodcastToolkit::Nlm::PODCAST_NOTE_TITLE
 PODCAST_METADATA_PROMPT = <<~PROMPT.freeze
   この録音を Podcast のエピソードとして公開します。日本語で、以下のフォーマットに厳密に従ってエピソードタイトルとエピソード説明を生成してください。前置きや補足は書かないでください。
 
@@ -95,21 +97,6 @@ def create_notebook(title)
   notebook_id
 end
 
-# nlm query は {"value":{"answer":"..."}} 形式で返す。本文は value.answer。
-def extract_answer(stdout)
-  parsed = JSON.parse(stdout.force_encoding("UTF-8"))
-  answer = parsed.dig("value", "answer") || parsed["answer"]
-  (answer || "").strip
-rescue JSON::ParserError
-  stdout.force_encoding("UTF-8").strip
-end
-
-# NotebookLM が最終回答ではなく思考要約（"**Title**" で始まる英語の途中経過）を
-# 返すことがあるため、その場合はリトライする。
-def thinking_frame?(answer)
-  answer.start_with?("**")
-end
-
 def query_notebook(notebook_id, prompt)
   last_answer = nil
 
@@ -125,10 +112,10 @@ def query_notebook(notebook_id, prompt)
       next
     end
 
-    answer = extract_answer(stdout)
+    answer = PodcastToolkit::Nlm.extract_answer(stdout)
     if answer.empty?
       warn "  WARN: Empty response from query"
-    elsif thinking_frame?(answer)
+    elsif PodcastToolkit::Nlm.thinking_frame?(answer)
       last_answer = answer
       warn "  WARN: Got thinking frame, retrying (#{attempt + 1}/#{QUERY_MAX_RETRIES})..."
     else

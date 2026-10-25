@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
-require 'fileutils'
 require 'json'
 require 'open3'
+require_relative 'lib/podcast_toolkit/cli'
+require_relative 'lib/podcast_toolkit/ffmpeg'
 
 # Audacity で行っていた Podcast 公開向けのマスタリング処理を ffmpeg で再現する。
 #
@@ -60,46 +61,6 @@ def loudnorm_apply_filter(measurements)
     ":measured_thresh=#{measurements['input_thresh']}" \
     ":offset=#{measurements['target_offset']}" \
     ':linear=true:print_format=summary'
-end
-
-def parse_arguments
-  if ARGV.length != 2
-    warn "Usage: ruby #{$PROGRAM_NAME} <SOURCE_DIRECTORY> <DESTINATION_DIRECTORY>"
-    warn "Example: ruby #{$PROGRAM_NAME} \"./mp3s\" \"./mastered\""
-    exit(1)
-  end
-  [ARGV[0], ARGV[1]]
-end
-
-def validate_source_directory(source_dir)
-  return if File.directory?(source_dir)
-
-  warn "Error: Source directory not found: #{source_dir}"
-  exit(1)
-end
-
-def ensure_destination_directory(dest_dir)
-  return if File.directory?(dest_dir)
-
-  puts "Destination directory '#{dest_dir}' does not exist. Creating it..."
-  FileUtils.mkdir_p(dest_dir)
-  puts "Successfully created destination directory: #{dest_dir}"
-rescue StandardError => e
-  warn "Error creating destination directory '#{dest_dir}': #{e.message}"
-  exit(1)
-end
-
-def get_audio_duration(input_path)
-  cmd = [
-    'ffprobe', '-v', 'error',
-    '-show_entries', 'format=duration',
-    '-of', 'default=noprint_wrappers=1:nokey=1',
-    input_path
-  ]
-  stdout, _stderr, status = Open3.capture3(*cmd)
-  return nil unless status.success?
-
-  stdout.strip.to_f
 end
 
 def detect_silence_periods(input_path)
@@ -240,20 +201,8 @@ def apply_processing(input_path, output_path, keep_filter_graph, measurements)
   true
 end
 
-def skip_existing_output?(input_path, output_path)
-  return false unless File.exist?(output_path)
-
-  warn "Skipping '#{File.basename(input_path)}' as '#{File.basename(output_path)}' already exists in destination."
-  true
-end
-
-def output_path_for(input_path, dest_dir)
-  name = File.basename(input_path, '.*')
-  File.join(dest_dir, "#{name}.mp3")
-end
-
 def compute_keep_filter_graph(input_path)
-  duration = get_audio_duration(input_path)
+  duration = PodcastToolkit::FFmpeg.audio_duration(input_path)
   return nil unless duration
 
   silence_periods = detect_silence_periods(input_path)
@@ -272,9 +221,9 @@ end
 
 def process_file(input_path, dest_dir)
   filename = File.basename(input_path)
-  output_path = output_path_for(input_path, dest_dir)
+  output_path = PodcastToolkit::CLI.output_path_for(input_path, dest_dir)
 
-  return :skipped if skip_existing_output?(input_path, output_path)
+  return :skipped if PodcastToolkit::CLI.skip_existing_output?(input_path, output_path)
 
   puts "[1/3] Detecting silence: '#{filename}'..."
   keep_filter_graph = compute_keep_filter_graph(input_path)
@@ -319,9 +268,9 @@ def display_summary(counts)
 end
 
 def main
-  source_dir, dest_dir = parse_arguments
-  validate_source_directory(source_dir)
-  ensure_destination_directory(dest_dir)
+  source_dir, dest_dir = PodcastToolkit::CLI.parse_source_dest_args(example: '"./mp3s" "./mastered"')
+  PodcastToolkit::CLI.validate_source_directory(source_dir)
+  PodcastToolkit::CLI.ensure_destination_directory(dest_dir)
 
   counts = process_source_directory(source_dir, dest_dir)
   display_summary(counts)
