@@ -63,6 +63,28 @@ def loudnorm_apply_filter(measurements)
     ':linear=true:print_format=summary'
 end
 
+def safe_utf8(str)
+  return '' if str.nil?
+
+  str.to_s.dup.force_encoding(Encoding::UTF_8).scrub
+end
+
+def safe_capture3(*cmd, **options)
+  stdout, stderr, status = Open3.capture3(*cmd, **options.merge(binmode: true))
+  [
+    safe_utf8(stdout),
+    safe_utf8(stderr),
+    status
+  ]
+end
+
+def parse_silence_output(stderr)
+  stderr = safe_utf8(stderr)
+  starts = stderr.scan(/silence_start:\s*(-?\d+(?:\.\d+)?)/).flatten.map(&:to_f)
+  ends = stderr.scan(/silence_end:\s*(-?\d+(?:\.\d+)?)/).flatten.map(&:to_f)
+  starts.zip(ends).reject { |s, e| s.nil? || e.nil? }
+end
+
 def detect_silence_periods(input_path)
   cmd = [
     'ffmpeg', '-hide_banner', '-nostats',
@@ -70,16 +92,14 @@ def detect_silence_periods(input_path)
     '-af', "silencedetect=noise=#{SILENCE_THRESHOLD_DB}dB:duration=#{SILENCE_DURATION_SEC}",
     '-f', 'null', '-'
   ]
-  _stdout, stderr, status = Open3.capture3(*cmd)
+  _stdout, stderr, status = safe_capture3(*cmd)
   unless status.success?
     warn "silencedetect failed for '#{File.basename(input_path)}':"
     warn stderr
     return nil
   end
 
-  starts = stderr.scan(/silence_start:\s*(-?\d+(?:\.\d+)?)/).flatten.map(&:to_f)
-  ends = stderr.scan(/silence_end:\s*(-?\d+(?:\.\d+)?)/).flatten.map(&:to_f)
-  starts.zip(ends).reject { |s, e| s.nil? || e.nil? }
+  parse_silence_output(stderr)
 end
 
 # 検出された無音区間 [s, e] (e-s >= duration) のうち、
@@ -139,6 +159,7 @@ def build_keep_filter_graph(keep_ranges)
 end
 
 def extract_loudnorm_json(stderr_output)
+  stderr_output = safe_utf8(stderr_output)
   start_idx = stderr_output.rindex('{')
   end_idx = stderr_output.rindex('}')
   return nil unless start_idx && end_idx && start_idx < end_idx
@@ -162,7 +183,7 @@ def run_ffmpeg_filter_complex(input_path, filter_complex, *output_args)
     '-map', '[out]',
     *output_args
   ]
-  Open3.capture3(*cmd)
+  safe_capture3(*cmd)
 end
 
 def analyze_loudness(input_path, keep_filter_graph)
