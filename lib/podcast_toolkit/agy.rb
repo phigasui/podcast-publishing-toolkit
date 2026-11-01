@@ -2,7 +2,7 @@
 
 require 'json'
 require 'open3'
-require 'tempfile'
+require 'tmpdir'
 require 'time'
 
 module PodcastToolkit
@@ -74,26 +74,37 @@ module PodcastToolkit
       nil
     end
 
+    # Mastered MP3s (~64MB for 45 min) make agy's read_file return an empty
+    # model response, so agy gets a mono 16kHz 32kbps copy instead (~17MB for
+    # 72 min, which works).
+    def downsample_cmd(src, dest)
+      ['ffmpeg', '-v', 'error', '-y', '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '32k', dest]
+    end
+
     # Run agy on one MP3. Returns [metadata_hash, nil] on success or
     # [nil, error_message] on failure.
     def generate(mp3_path, model: DEFAULT_MODEL, timeout: DEFAULT_TIMEOUT)
-      Tempfile.create(['agy-schema', '.json']) do |schema|
-        schema.write(JSON.generate(SCHEMA))
-        schema.flush
+      Dir.mktmpdir('agy-audio') do |dir|
+        audio = File.join(dir, File.basename(mp3_path))
+        _, stderr, status = Open3.capture3(*downsample_cmd(File.expand_path(mp3_path), audio))
+        return [nil, "ffmpeg exited #{status.exitstatus}: #{stderr.strip}"] unless status.success?
+
+        schema = File.join(dir, 'schema.json')
+        File.write(schema, JSON.generate(SCHEMA))
         cmd = [
           'agy', '-p', prompt(File.basename(mp3_path)),
           '--model', model,
           '--output-format', 'json',
-          '--json-schema', schema.path,
+          '--json-schema', schema,
           '--print-timeout', "#{timeout}s"
         ]
-        stdout, stderr, status = Open3.capture3(*cmd, chdir: File.dirname(File.expand_path(mp3_path)))
+        stdout, stderr, status = Open3.capture3(*cmd, chdir: dir)
         return [nil, "agy exited #{status.exitstatus}: #{stderr.strip}"] unless status.success?
 
         parse_result(stdout)
       end
-    rescue SystemCallError => e # agy 未インストール、chdir 失敗など
-      [nil, "could not run agy: #{e.message}"]
+    rescue SystemCallError => e # agy / ffmpeg 未インストールなど
+      [nil, "could not run command: #{e.message}"]
     end
 
     # Parse `agy --output-format json` output into a metadata hash.

@@ -71,11 +71,12 @@ ruby generate_episode_metadata.rb [--force] [--model MODEL] <MP3_DIRECTORY>
 - 読める `.meta.json` が既にある MP3 はスキップします（壊れている・タイトルや説明が空のものは作り直します）。`--force` で全件作り直します。
 - 拡張子は大文字小文字を区別しません（`EP01.MP3` も対象）。
 - 1 件でも失敗すると終了コード 1 で終わります。
+- マスタリング済みの MP3（45 分で約 64MB）をそのまま渡すと agy が空応答になるため、一時ディレクトリに `ffmpeg` でモノラル 16kHz・32kbps のコピー（72 分で約 17MB）を作って聞かせます。元の MP3 は変更しません。
 - モデルの既定は `gemini-3.8-flash-low`。`agy models` で一覧を確認できます。
 - 出力は `--json-schema` で構造化しているため、NotebookLM のような思考要約の混入や引用記号の除去は不要です。
 - 音声に無い内容が説明に書き足されることがあります。公開前に `publish_to_spotify.rb --no-publish` でステージし、確認してから公開してください。
 
-`agy` が `PATH` に通っており、ログイン済みである必要があります。
+`agy` と `ffmpeg` が `PATH` に通っており、`agy` はログイン済みである必要があります。
 
 ### `create_notebooklm_notebooks.rb`（旧方式）
 
