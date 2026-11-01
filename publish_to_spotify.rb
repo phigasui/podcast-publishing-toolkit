@@ -9,6 +9,7 @@ require 'set'
 require 'time'
 require 'uri'
 require 'yaml'
+require_relative 'lib/podcast_toolkit/agy'
 require_relative 'lib/podcast_toolkit/nlm'
 
 # Cloudflare R2 にマスタリング済み MP3 と RSS フィード (feed.xml) をアップロードし、
@@ -18,12 +19,14 @@ require_relative 'lib/podcast_toolkit/nlm'
 #   - podcast.yml … チャンネル設定 (R2, 公開 URL, 既存 RSS URL, スケジュール)
 #   - .env        … R2 認証情報 (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)
 #
-# 依存: aws CLI, curl, ffprobe, nlm CLI
+# 依存: aws CLI, curl, ffprobe（nlm CLI は <name>.meta.json が無い MP3 があるときだけ）
 #
 # モード:
 #   --bootstrap : 既存 RSS を取得してそのまま feed.xml として R2 へアップロード
 #                 (Spotify 側で RSS フィード URL を新 URL に差し替える初期セットアップ)
-#   <MP3_DIR>   : マスタリング済み MP3 と NotebookLM のメタデータからエピソードを追加
+#   <MP3_DIR>   : マスタリング済み MP3 とメタデータからエピソードを追加。メタデータは
+#                 generate_episode_metadata.rb が作る <name>.meta.json を優先し、
+#                 無ければ NotebookLM の「Podcast 公開用メタデータ」ノートを読む
 
 PODCAST_NOTE_TITLE = PodcastToolkit::Nlm::PODCAST_NOTE_TITLE
 DEFAULT_CONFIG_PATH = 'podcast.yml'
@@ -445,6 +448,26 @@ def print_dry_run(episode)
   puts "    url:      #{episode[:mp3_url]}"
 end
 
+# Metadata for one MP3: <name>.meta.json (generate_episode_metadata.rb) first,
+# then the NotebookLM note. Warns and returns nil when neither is usable.
+def resolve_metadata(mp3, filename, filename_to_notebook)
+  if File.exist?(PodcastToolkit::Agy.metadata_path(mp3))
+    metadata = PodcastToolkit::Agy.load_metadata(mp3)
+    warn "  WARN: Could not read #{File.basename(PodcastToolkit::Agy.metadata_path(mp3))}; skipping" unless metadata
+    return metadata
+  end
+
+  notebook_id = filename_to_notebook[filename]
+  unless notebook_id
+    warn '  WARN: No metadata JSON or notebook found for this MP3; skipping'
+    return nil
+  end
+
+  metadata = parse_metadata(fetch_metadata_note_text(notebook_id))
+  warn "  WARN: Could not parse '#{PODCAST_NOTE_TITLE}' note; skipping" unless metadata
+  metadata
+end
+
 # Process a single MP3. Returns [status, sleep_after] where status is one of
 # :added / :skipped / :failed and sleep_after is true only after a real upload
 # (so the caller paces R2 requests). Prints per-episode progress but not the
@@ -455,17 +478,8 @@ def publish_one_episode(mp3, filename, feed, filename_to_notebook, schedule, ind
     return [:skipped, false]
   end
 
-  notebook_id = filename_to_notebook[filename]
-  unless notebook_id
-    warn '  WARN: No notebook found for this MP3; skipping'
-    return [:failed, false]
-  end
-
-  metadata = parse_metadata(fetch_metadata_note_text(notebook_id))
-  unless metadata
-    warn "  WARN: Could not parse '#{PODCAST_NOTE_TITLE}' note; skipping"
-    return [:failed, false]
-  end
+  metadata = resolve_metadata(mp3, filename, filename_to_notebook)
+  return [:failed, false] unless metadata
 
   duration_sec = mp3_duration_seconds(mp3)
   unless duration_sec
@@ -546,7 +560,9 @@ def run_publish(mp3_dir, config, options)
 
   local_feed = local_feed_path(options)
   feed = prepare_feed(config, local_feed)
-  filename_to_notebook = fetch_filename_to_notebook_id_map
+  # nlm は遅く認証も要るので、JSON が揃っていれば呼ばない
+  needs_notebooks = mp3_files.any? { |mp3| !File.exist?(PodcastToolkit::Agy.metadata_path(mp3)) }
+  filename_to_notebook = needs_notebooks ? fetch_filename_to_notebook_id_map : {}
   puts
 
   counts = publish_episodes(mp3_files, feed, filename_to_notebook, schedule, config, options)
@@ -606,8 +622,8 @@ def print_usage
       既存 RSS を取得してそのまま feed.xml として R2 にアップロードします。
 
     Publish mode:
-      MP3_DIR 配下のマスタリング済み MP3 ごとに、NotebookLM の
-      「#{PODCAST_NOTE_TITLE}」ノートからタイトル・説明を抽出し、
+      MP3_DIR 配下のマスタリング済み MP3 ごとに、<name>.meta.json
+      （無ければ NotebookLM の「#{PODCAST_NOTE_TITLE}」ノート）からタイトル・説明を読み、
       MP3 を R2 にアップロードして feed.xml に <item> を追加します。
 
       --start-date    最初のエピソードの公開日時 (ISO8601)。省略時は podcast.yml の値。
