@@ -76,4 +76,19 @@ class PodcastToolkitNlmTest < Minitest::Test
     assert_nil Nlm.normalize_literal_escapes(nil)
     assert_equal 42, Nlm.normalize_literal_escapes(42)
   end
+
+  # ---- audio source filenames ----
+
+  FakeStatus = Struct.new(:ok) { def success? = ok }
+
+  def test_audio_source_filenames_decodes_and_filters_audio
+    json = '[{"type":"audio","title":"%E3%83%86%E3%82%B9%E3%83%88.mp3"},{"type":"pdf","title":"x.pdf"}]'
+    runner = ->(*_args) { [json, '', FakeStatus.new(true)] }
+    assert_equal ['テスト.mp3'], Nlm.audio_source_filenames('nb1', runner: runner)
+  end
+
+  def test_audio_source_filenames_nil_on_failure
+    runner = ->(*_args) { ['', 'boom', FakeStatus.new(false)] }
+    assert_nil Nlm.audio_source_filenames('nb1', runner: runner)
+  end
 end

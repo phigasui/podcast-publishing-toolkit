@@ -184,14 +184,7 @@ def fetch_filename_to_notebook_id_map
   notebooks.each do |nb|
     next if nb['source_count'].to_i.zero?
 
-    src_stdout, _err, src_status = Open3.capture3('nlm', 'source', 'list', nb['id'], '--json')
-    next unless src_status.success?
-
-    sources = JSON.parse(src_stdout)
-    sources.each do |src|
-      next unless src['type'] == 'audio'
-
-      decoded = URI.decode_www_form_component(src['title'])
+    PodcastToolkit::Nlm.audio_source_filenames(nb['id'])&.each do |decoded|
       result[decoded] ||= nb['id']
     end
   end
