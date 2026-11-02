@@ -91,4 +91,19 @@ class PodcastToolkitNlmTest < Minitest::Test
     runner = ->(*_args) { ['', 'boom', FakeStatus.new(false)] }
     assert_nil Nlm.audio_source_filenames('nb1', runner: runner)
   end
+
+  def test_audio_source_filenames_nil_on_non_array_json
+    runner = ->(*_args) { ['{"a":1}', '', FakeStatus.new(true)] }
+    assert_nil Nlm.audio_source_filenames('nb1', runner: runner)
+  end
+
+  def test_audio_source_filenames_passes_expected_command
+    seen = nil
+    runner = lambda do |*args|
+      seen = args
+      ['[]', '', FakeStatus.new(true)]
+    end
+    assert_equal [], Nlm.audio_source_filenames('nb1', runner: runner)
+    assert_equal %w[nlm source list nb1 --json], seen
+  end
 end

@@ -26,9 +26,12 @@ module PodcastToolkit
       stdout, _stderr, status = runner.call('nlm', 'source', 'list', notebook_id, '--json')
       return nil unless status.success?
 
-      JSON.parse(stdout.dup.force_encoding('UTF-8'))
-          .select { |src| src['type'] == 'audio' }
-          .map { |src| URI.decode_www_form_component(src['title']) }
+      parsed = JSON.parse(stdout.dup.force_encoding('UTF-8'))
+      return nil unless parsed.is_a?(Array) # unexpected shape: treat as failure
+
+      parsed
+        .select { |src| src.is_a?(Hash) && src['type'] == 'audio' }
+        .map { |src| URI.decode_www_form_component(src['title']) }
     end
 
     # nlm query returns {"value":{"answer":"..."}}; the body is value.answer.
