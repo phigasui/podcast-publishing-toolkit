@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'open3'
+require 'uri'
 
 module PodcastToolkit
   # Helpers for parsing NotebookLM (`nlm` CLI) responses. The response-cleanup
@@ -14,6 +16,23 @@ module PodcastToolkit
     PODCAST_NOTE_TITLE = 'Podcast 公開用メタデータ'
 
     module_function
+
+    # Decoded titles of the audio sources in a notebook (`nlm source list`).
+    # Shared by create_notebooklm_notebooks.rb and publish_to_spotify.rb so both
+    # derive the "filename -> notebook" mapping the same way. Returns nil when
+    # the nlm call fails. `runner` is injectable for tests; it must return
+    # [stdout, stderr, status] like Open3.capture3.
+    def audio_source_filenames(notebook_id, runner: Open3.method(:capture3))
+      stdout, _stderr, status = runner.call('nlm', 'source', 'list', notebook_id, '--json')
+      return nil unless status.success?
+
+      parsed = JSON.parse(stdout.dup.force_encoding('UTF-8'))
+      return nil unless parsed.is_a?(Array) # unexpected shape: treat as failure
+
+      parsed
+        .select { |src| src.is_a?(Hash) && src['type'] == 'audio' }
+        .map { |src| URI.decode_www_form_component(src['title']) }
+    end
 
     # nlm query returns {"value":{"answer":"..."}}; the body is value.answer.
     # Falls back to the raw (stripped) stdout when the output is not JSON.

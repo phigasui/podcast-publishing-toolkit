@@ -45,14 +45,7 @@ def fetch_notebooks_state
       next
     end
 
-    src_stdout, _src_stderr, src_status = Open3.capture3("nlm", "source", "list", nb["id"], "--json")
-    next unless src_status.success?
-
-    sources = JSON.parse(src_stdout.force_encoding("UTF-8"))
-    sources.each do |src|
-      next unless src["type"] == "audio"
-
-      decoded_title = URI.decode_www_form_component(src["title"])
+    PodcastToolkit::Nlm.audio_source_filenames(nb["id"])&.each do |decoded_title|
       source_filenames.add(decoded_title)
       notebook_by_filename[decoded_title] ||= nb["id"]
     end
