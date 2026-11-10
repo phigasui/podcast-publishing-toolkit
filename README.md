@@ -1,6 +1,6 @@
 # podcast-publishing-toolkit
 
-Google Meet の録画を Podcast として配信するためのパイプラインを構成する Ruby スクリプト集です。録画動画の MP3 変換、Podcast 公開向けのマスタリング、NotebookLM へのノートブック作成とエピソードメタデータ生成、Cloudflare R2 にホスティングした RSS フィード経由での Spotify for Creators 等への配信までを一通りカバーします。
+Google Meet の録画を Podcast として配信するためのパイプラインを構成する Ruby スクリプト集です。録画動画の MP3 変換、Podcast 公開向けのマスタリング、Antigravity CLI (`agy`) によるエピソードメタデータ生成、Cloudflare R2 にホスティングした RSS フィード経由での Spotify for Creators 等への配信までを一通りカバーします。
 
 ## 構成図
 
@@ -15,11 +15,10 @@ flowchart TD
     mp3s --> master["master_for_podcast.rb<br/>(ffmpeg: silencedetect+concat / acompressor / loudnorm)"]
     master --> mastered[/"./mastered (マスタリング済み MP3)"/]
 
-    mastered --> notebook["create_notebooklm_notebooks.rb<br/>(nlm CLI)"]
-    notebook --> nlm[("NotebookLM<br/>ノートブック")]
-    nlm -.-> meta["Podcast 公開用メタデータ<br/>カット希望箇所チェック"]
+    mastered --> generate["generate_episode_metadata.rb<br/>(agy CLI)"]
+    generate --> meta[/"&lt;name&gt;.meta.json<br/>タイトル・説明・カット依頼"/]
 
-    mastered --> publish["publish_to_spotify.rb<br/>(aws / curl / ffprobe / nlm)"]
+    mastered --> publish["publish_to_spotify.rb<br/>(aws / curl / ffprobe)"]
     meta -.->|タイトル・説明を参照| publish
     publish -->|MP3 + feed.xml をアップロード| r2[("Cloudflare R2")]
     r2 -->|RSS フィード| spotify(["Spotify for Creators 等<br/>Podcast プラットフォーム"])
@@ -61,7 +60,27 @@ ruby master_for_podcast.rb <SOURCE_DIR> <DEST_DIR>
 
 `ffmpeg` が `PATH` に通っている必要があります。
 
-### `create_notebooklm_notebooks.rb`
+### `generate_episode_metadata.rb`
+
+ディレクトリ内の MP3 ごとに、[Antigravity CLI](https://antigravity.google/) (`agy -p`) に音声を直接聞かせて、Podcast 公開用のエピソードタイトル・エピソード説明と、録音内の「ここはカットしてほしい」などの削除依頼発言（おおよそのタイムスタンプ付き）を生成します。結果は MP3 の隣に `<MP3 のベース名>.meta.json` として保存し、標準出力にも表示します。
+
+```sh
+ruby generate_episode_metadata.rb [--force] [--model MODEL] <MP3_DIRECTORY>
+```
+
+- 読める `.meta.json` が既にある MP3 はスキップします（壊れている・タイトルや説明が空のものは作り直します）。`--force` で全件作り直します。
+- 拡張子は大文字小文字を区別しません（`EP01.MP3` も対象）。
+- 1 件でも失敗すると終了コード 1 で終わります。
+- マスタリング済みの MP3（45 分で約 64MB）をそのまま渡すと agy が空応答になるため、一時ディレクトリに `ffmpeg` でモノラル 16kHz・32kbps のコピー（72 分で約 17MB）を作って聞かせます。元の MP3 は変更しません。
+- モデルの既定は `gemini-3.8-flash-low`。`agy models` で一覧を確認できます。
+- 出力は `--json-schema` で構造化しているため、NotebookLM のような思考要約の混入や引用記号の除去は不要です。
+- 音声に無い内容が説明に書き足されることがあります。公開前に `publish_to_spotify.rb --no-publish` でステージし、確認してから公開してください。
+
+`agy` と `ffmpeg` が `PATH` に通っており、`agy` はログイン済みである必要があります。
+
+### `create_notebooklm_notebooks.rb`（旧方式）
+
+`generate_episode_metadata.rb` 導入前の NotebookLM 版です。`.meta.json` が無い MP3 については、`publish_to_spotify.rb` が引き続き NotebookLM のノートを読みます。`.meta.json` があるのに読めない場合は NotebookLM には戻らず、その MP3 は失敗として飛ばします。
 
 ディレクトリ内の MP3 ごとに NotebookLM のノートブックを作成し、その MP3 をソースとして登録します。[`nlm`](https://github.com/tmc/nlm) CLI を利用します。
 
@@ -90,11 +109,11 @@ ruby create_notebooklm_notebooks.rb --backfill <MP3_DIRECTORY>
 
 ### `publish_to_spotify.rb`
 
-マスタリング済み MP3 と NotebookLM の「Podcast 公開用メタデータ」ノートをもとに、Cloudflare R2 にホスティングした RSS フィード（`feed.xml`）へエピソードを追加します。Spotify for Creators をはじめ RSS をインポートする Podcast プラットフォームに配信できます。
+マスタリング済み MP3 とエピソードメタデータ（`<name>.meta.json`。無ければ NotebookLM の「Podcast 公開用メタデータ」ノート）をもとに、Cloudflare R2 にホスティングした RSS フィード（`feed.xml`）へエピソードを追加します。Spotify for Creators をはじめ RSS をインポートする Podcast プラットフォームに配信できます。
 
 #### 前提
 
-- `aws` CLI、`curl`、`ffprobe`、`nlm` が `PATH` に通っていること（`nlm login` で認証済み）
+- `aws` CLI、`curl`、`ffprobe` が `PATH` に通っていること（`.meta.json` が無い MP3 を NotebookLM から読む場合のみ `nlm` も必要。`nlm login` で認証済み）
 - `podcast.yml.example` を `podcast.yml` にコピーし、R2 アカウント情報・公開 URL・既存 RSS URL を記入
 - `.env.example` を `.env` にコピーし、R2 のアクセスキー（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）を設定
 - どちらのファイルも `.gitignore` 済み
@@ -158,7 +177,7 @@ ruby publish_to_spotify.rb --publish-feed
 1. Google Drive から Meet の録画（mp4）をダウンロード
 2. `ruby convert_meet_recordings.rb ./videos ./mp3s`
 3. `ruby master_for_podcast.rb ./mp3s ./mastered`
-4. `ruby create_notebooklm_notebooks.rb ./mastered`
+4. `ruby generate_episode_metadata.rb ./mastered`（カット依頼があれば編集し直す）
 5. （初回のみ）`ruby publish_to_spotify.rb --bootstrap` → Spotify for Creators で RSS URL を差し替え
 6. `ruby publish_to_spotify.rb ./mastered --start-date <YYYY-MM-DDTHH:MM:SS+09:00> --no-publish`（ステージ）
 7. ローカルの `feed.xml` でタイトル・説明をレビュー・修正

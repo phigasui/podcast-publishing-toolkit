@@ -25,6 +25,7 @@ def fetch_current_feed(_config, local)
 end
 
 def fetch_filename_to_notebook_id_map
+  $notebook_map_calls += 1
   { 'ep_ok.mp3' => 'nb_ok', 'ep_nometa.mp3' => 'nb_nometa' }
 end
 
@@ -57,21 +58,57 @@ class PublishRunPublishTest < Minitest::Test
     # ep_nonb.mp3     -> no notebook (failed)
     # ep_ok.mp3       -> added (dry-run)
     assert_includes output, 'Skipped (already in feed)'
-    assert_includes output, 'No notebook found for this MP3'
+    assert_includes output, 'No metadata JSON or notebook found for this MP3'
     assert_includes output, "Could not parse"
     assert_includes output, '[dry-run] would upload MP3 and add item'
     assert_includes output, '良いタイトル'
     assert_includes output, 'Added: 1, Skipped: 1, Failed: 2, Total: 4'
     assert_includes output, '(dry-run: feed.xml not modified)'
+    assert_equal 1, $notebook_map_calls
+  end
+
+  # ep_ok.mp3 has both a notebook and a broken .meta.json: the JSON wins (and
+  # fails) instead of silently falling back. ep_json.mp3 has only JSON.
+  # Every MP3 has a .meta.json, so nlm is never asked for the notebook map.
+  def test_meta_json_takes_precedence_and_skips_nlm
+    metas = {
+      'ep_json.meta.json' => JSON.generate('title' => 'JSON のタイトル', 'description' => 'JSON の説明',
+                                           'cut_requests' => []),
+      'ep_ok.meta.json' => '{ broken'
+    }
+    output = with_fixture_dir(%w[ep_json.mp3 ep_ok.mp3], metas) do |dir|
+      capture_streams { run_publish(dir, CONFIG, dry_run_options(dir)) }
+    end
+
+    assert_includes output, 'JSON のタイトル'
+    assert_includes output, 'Could not read ep_ok.meta.json'
+    refute_includes output, '良いタイトル'
+    assert_includes output, 'Added: 1, Skipped: 0, Failed: 1, Total: 2'
+    assert_equal 0, $notebook_map_calls
   end
 
   private
 
-  def with_fixture_dir
+  CONFIG = {
+    'r2' => { 'bucket' => 'b', 'account_id' => 'acc',
+              'public_base_url' => 'https://ex.com', 'key_prefix' => '' }
+  }.freeze
+
+  def setup
+    $notebook_map_calls = 0
+  end
+
+  def dry_run_options(dir)
+    { dry_run: true, start_date: '2026-01-01T09:00:00+09:00', interval_days: 7,
+      feed_path: File.join(dir, 'feed.xml') }
+  end
+
+  def with_fixture_dir(names = %w[ep_existing.mp3 ep_nometa.mp3 ep_nonb.mp3 ep_ok.mp3], metas = {})
     Dir.mktmpdir do |dir|
-      %w[ep_existing.mp3 ep_nometa.mp3 ep_nonb.mp3 ep_ok.mp3].each do |name|
+      names.each do |name|
         File.write(File.join(dir, name), 'x' * 1024)
       end
+      metas.each { |name, body| File.write(File.join(dir, name), body) }
       # The feed path is passed explicitly via options[:feed_path] (--feed).
       yield dir
     end
