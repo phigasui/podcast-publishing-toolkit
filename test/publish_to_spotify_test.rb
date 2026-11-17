@@ -38,6 +38,29 @@ class PublishToSpotifyTest < Minitest::Test
     assert_nil parse_metadata(nil)
   end
 
+  # ---- local_feed_path resolution ----
+
+  def test_local_feed_path_prefers_cli_options
+    opts = { feed_path: '/custom/path/feed.xml' }
+    cfg = { 'feed_path' => '../other/feed.xml' }
+    assert_equal '/custom/path/feed.xml', local_feed_path(opts, cfg)
+  end
+
+  def test_local_feed_path_falls_back_to_config
+    opts = {}
+    cfg = { 'feed_path' => 'relative/feed.xml' }
+    expected = File.expand_path('relative/feed.xml', File.expand_path('..', __dir__))
+    assert_equal expected, local_feed_path(opts, cfg)
+  end
+
+  def test_local_feed_path_defaults_to_local_feed_xml
+    opts = {}
+    cfg = {}
+    expected = File.join(File.expand_path('..', __dir__), DEFAULT_LOCAL_FEED_PATH)
+    assert_equal expected, local_feed_path(opts, cfg)
+    assert_equal expected, local_feed_path(opts)
+  end
+
   # ---- duration & schedule ----
 
   def test_format_duration
