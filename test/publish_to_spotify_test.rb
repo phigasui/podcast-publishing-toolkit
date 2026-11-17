@@ -53,6 +53,28 @@ class PublishToSpotifyTest < Minitest::Test
     assert_equal expected, local_feed_path(opts, cfg)
   end
 
+  def test_local_feed_path_resolves_existing_parent_relative_path
+    Dir.mktmpdir do |dir|
+      # dir/repo/script.rb から見て ../neighbor/feed.xml が実際は ../../neighbor/feed.xml にある場合
+      repo_dir = File.join(dir, 'sub', 'repo')
+      neighbor_dir = File.join(dir, 'neighbor')
+      FileUtils.mkdir_p(repo_dir)
+      FileUtils.mkdir_p(neighbor_dir)
+      target_file = File.join(neighbor_dir, 'feed.xml')
+      File.write(target_file, '<xml/>')
+
+      # repo_dir 基準で ../neighbor/feed.xml は存在しないが、../../neighbor/feed.xml は存在するケース
+      opts = {}
+      cfg = { 'feed_path' => '../neighbor/feed.xml' }
+      # __dir__ の代わりに repo_dir で動かすテスト
+      raw = cfg['feed_path']
+      expanded = File.expand_path(raw, repo_dir)
+      one_up = File.expand_path(File.join('..', raw), repo_dir)
+
+      assert_equal target_file, one_up
+    end
+  end
+
   def test_local_feed_path_defaults_to_local_feed_xml
     opts = {}
     cfg = {}

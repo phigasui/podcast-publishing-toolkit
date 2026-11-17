@@ -322,9 +322,15 @@ end
 # CWD-relative, so running from another directory doesn't silently read/write a different feed.xml.
 def local_feed_path(options, config = nil)
   if options[:feed_path] && !options[:feed_path].to_s.empty?
-    options[:feed_path]
+    File.expand_path(options[:feed_path])
   elsif config && config['feed_path'] && !config['feed_path'].to_s.empty?
-    File.expand_path(config['feed_path'], __dir__)
+    raw_path = config['feed_path'].to_s
+    expanded = File.expand_path(raw_path, __dir__)
+    if !File.exist?(expanded) && raw_path.start_with?('..')
+      one_up = File.expand_path(File.join('..', raw_path), __dir__)
+      return one_up if File.exist?(one_up)
+    end
+    expanded
   else
     File.join(__dir__, DEFAULT_LOCAL_FEED_PATH)
   end
