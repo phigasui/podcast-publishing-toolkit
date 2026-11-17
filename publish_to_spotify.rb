@@ -320,19 +320,19 @@ end
 # Resolve the local feed.xml path. Honors --feed; otherwise checks podcast.yml's
 # feed_path; otherwise defaults to a path next to this script rather than
 # CWD-relative, so running from another directory doesn't silently read/write a different feed.xml.
-def local_feed_path(options, config = nil)
+def local_feed_path(options, config = nil, base_dir: __dir__)
   if options[:feed_path] && !options[:feed_path].to_s.empty?
     File.expand_path(options[:feed_path])
   elsif config && config['feed_path'] && !config['feed_path'].to_s.empty?
     raw_path = config['feed_path'].to_s
-    expanded = File.expand_path(raw_path, __dir__)
+    expanded = File.expand_path(raw_path, base_dir)
     if !File.exist?(expanded) && raw_path.start_with?('..')
-      one_up = File.expand_path(File.join('..', raw_path), __dir__)
+      one_up = File.expand_path(File.join('..', raw_path), base_dir)
       return one_up if File.exist?(one_up)
     end
     expanded
   else
-    File.join(__dir__, DEFAULT_LOCAL_FEED_PATH)
+    File.join(base_dir, DEFAULT_LOCAL_FEED_PATH)
   end
 end
 

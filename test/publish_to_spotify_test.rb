@@ -66,13 +66,17 @@ class PublishToSpotifyTest < Minitest::Test
       # repo_dir 基準で ../neighbor/feed.xml は存在しないが、../../neighbor/feed.xml は存在するケース
       opts = {}
       cfg = { 'feed_path' => '../neighbor/feed.xml' }
-      # __dir__ の代わりに repo_dir で動かすテスト
-      raw = cfg['feed_path']
-      expanded = File.expand_path(raw, repo_dir)
-      one_up = File.expand_path(File.join('..', raw), repo_dir)
 
-      assert_equal target_file, one_up
+      resolved = local_feed_path(opts, cfg, base_dir: repo_dir)
+      assert_equal target_file, resolved
     end
+  end
+
+  def test_local_feed_path_empty_string_falls_back_to_default
+    opts = {}
+    cfg = { 'feed_path' => '' }
+    expected = File.join(File.expand_path('..', __dir__), DEFAULT_LOCAL_FEED_PATH)
+    assert_equal expected, local_feed_path(opts, cfg)
   end
 
   def test_local_feed_path_defaults_to_local_feed_xml
