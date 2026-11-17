@@ -20,7 +20,9 @@ flowchart TD
 
     mastered --> publish["publish_to_spotify.rb<br/>(aws / curl / ffprobe)"]
     meta -.->|タイトル・説明を参照| publish
-    publish -->|MP3 + feed.xml をアップロード| r2[("Cloudflare R2")]
+    publish -->|MP3 アップロード| r2[("Cloudflare R2")]
+    publish -->|feed.xml ステージ| feedrepo[("bytecafe-fm/feed<br/>(GitHub PR & Actions)")]
+    feedrepo -->|マージで自動配信| r2
     r2 -->|RSS フィード| spotify(["Spotify for Creators 等<br/>Podcast プラットフォーム"])
 ```
 
@@ -153,24 +155,31 @@ ruby publish_to_spotify.rb ./mastered \
 
 `--dry-run` を付けるとアップロードや `feed.xml` 更新を行わず、追加予定のタイトル・公開日時・MP3 URL のみ表示します。
 
-#### 公開前レビュー（タイトル・説明の修正フロー）
+#### 公開前レビュー（GitHub PR 連携フロー）
 
-NotebookLM が生成したタイトルや説明を公開前に確認・修正したい場合は、`--no-publish` でステージしてから `--publish-feed` で公開する 2 段階に分けます。
+共同録音メンバーとタイトル・説明文をレビュー・Approve してから公開する場合、別リポジトリ [`bytecafe-fm/feed`](https://github.com/bytecafe-fm/feed) と連携します。
 
-```sh
-# 1. ステージ: MP3 アップロードとローカル feed.xml への追記まで行い、公開はしない
-ruby publish_to_spotify.rb ./mastered --no-publish
+1. `podcast.yml` に `feed_path: "../bytecafe-fm/feed/feed.xml"` を設定
+2. `--no-publish` でステージ（MP3 を R2 にアップロードし、`bytecafe-fm/feed/feed.xml` に `<item>` を追加）
+   ```sh
+   ruby publish_to_spotify.rb ./mastered --no-publish
+   ```
+3. `bytecafe-fm/feed` リポジトリでトピックブランチを作成して PR を作成
+   ```sh
+   cd ../bytecafe-fm/feed
+   git switch -c episode/epXX
+   git commit -am "feat: add episode XX"
+   git push -u origin episode/epXX
+   gh pr create --fill
+   ```
+4. GitHub 上で PR の Checks（エピソードサマリー）を確認し、メンバーの Approve 後に `main` へマージすると、GitHub Actions により Cloudflare R2 に自動配信されます。
 
-# 2. レビュー: ローカルの feed.xml を開き、タイトル・説明を直接修正
-
-# 3. 公開: ローカルの feed.xml をそのまま R2 にアップロード
-ruby publish_to_spotify.rb --publish-feed
-```
+※ 従来通り本リポジトリ単体で完結させたい場合は、`feed.xml` を直接編集したあと `ruby publish_to_spotify.rb --publish-feed` を実行して R2 に直接アップロードすることも可能です。
 
 注意点:
 
 - `--no-publish` のステージ時点で MP3 は R2 にアップロードされます（公開 URL は `feed.xml` が公開されるまで参照されないため実害はありませんが、エピソードを取りやめた場合は R2 上に未参照の MP3 が残ります）。
-- `--no-publish` は実行のたびに R2 から最新の `feed.xml` を再取得して上書きします。**ステージ後に手で修正したら、再度 `--no-publish` を実行せずに `--publish-feed` へ進んでください**（修正が失われます）。
+- `--no-publish` は実行のたびに R2 から最新の `feed.xml` を再取得して上書きします。**ステージ後に手で修正したら、再度 `--no-publish` を実行せずに PR 作成や `--publish-feed` へ進んでください**（修正が失われます）。
 
 ## 典型的なワークフロー
 
@@ -180,5 +189,6 @@ ruby publish_to_spotify.rb --publish-feed
 4. `ruby generate_episode_metadata.rb ./mastered`（カット依頼があれば編集し直す）
 5. （初回のみ）`ruby publish_to_spotify.rb --bootstrap` → Spotify for Creators で RSS URL を差し替え
 6. `ruby publish_to_spotify.rb ./mastered --start-date <YYYY-MM-DDTHH:MM:SS+09:00> --no-publish`（ステージ）
-7. ローカルの `feed.xml` でタイトル・説明をレビュー・修正
-8. `ruby publish_to_spotify.rb --publish-feed`（公開）
+7. `bytecafe-fm/feed` 側でブランチ作成・PR 作成
+8. 共同録音メンバーによる PR レビュー・Approve
+9. `main` ブランチへマージ（GitHub Actions により R2 へ自動配信）

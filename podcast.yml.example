@@ -16,6 +16,10 @@ r2:
 # 既存 RSS フィードの URL（--bootstrap で取得元として使用）
 existing_rss_url: "<https://anchor.fm/s/.../podcast.rss>"
 
+# feed.xml のローカル保存先（省略時はスクリプト直下の feed.xml）
+# 別リポジトリ（例: bytecafe-fm/feed）でフィードを管理している場合に指定します。
+# feed_path: "../bytecafe-fm/feed/feed.xml"
+
 # 予約公開のデフォルト
 schedule:
   # 通常モードで複数 MP3 をまとめて投入する際の最初のエピソードの公開日時
