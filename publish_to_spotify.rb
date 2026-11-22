@@ -383,14 +383,17 @@ end
 
 def latest_pub_date(doc)
   latest = nil
+  unparsed = 0
   doc.root.elements.each('channel/item/pubDate') do |el|
     t = begin
       Time.rfc2822(el.text.to_s.strip)
     rescue ArgumentError
+      unparsed += 1
       nil
     end
     latest = t if t && (latest.nil? || t > latest)
   end
+  warn "Warning: 解析できない pubDate が #{unparsed} 件あります" if unparsed.positive?
   latest
 end
 
