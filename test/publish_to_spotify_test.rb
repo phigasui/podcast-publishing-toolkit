@@ -56,6 +56,28 @@ class PublishToSpotifyTest < Minitest::Test
                  compute_pub_date('2026-01-01T09:00:00+09:00', 7, 2).rfc2822
   end
 
+  def test_clamp_start_date_keeps_future_start
+    latest = Time.parse('2026-01-01T09:00:00+09:00')
+    assert_equal '2026-02-01T09:00:00+09:00', clamp_start_date('2026-02-01T09:00:00+09:00', 7, latest)
+    assert_equal '2026-02-01T09:00:00+09:00', clamp_start_date('2026-02-01T09:00:00+09:00', 7, nil)
+  end
+
+  def test_clamp_start_date_moves_past_start_after_latest
+    latest = Time.parse('2026-01-01T09:00:00+09:00')
+    assert_equal Time.parse('2026-01-08T09:00:00+09:00'),
+                 Time.parse(clamp_start_date('2025-12-01T09:00:00+09:00', 7, latest))
+    # 同時刻も重複なので繰り上げ
+    assert_equal Time.parse('2026-01-08T09:00:00+09:00'),
+                 Time.parse(clamp_start_date('2026-01-01T09:00:00+09:00', 7, latest))
+  end
+
+  def test_latest_pub_date_picks_max
+    doc = REXML::Document.new('<rss><channel><item><pubDate>Thu, 01 Jan 2026 09:00:00 +0900</pubDate></item>' \
+                              '<item><pubDate>Thu, 15 Jan 2026 09:00:00 +0900</pubDate></item>' \
+                              '<item><pubDate>Mon, 05 Jan 2026 09:00:00 +0900</pubDate></item></channel></rss>')
+    assert_equal Time.parse('2026-01-15T09:00:00+09:00'), latest_pub_date(doc)
+  end
+
   # ---- R2 key / URL construction ----
 
   def test_r2_key_with_prefix

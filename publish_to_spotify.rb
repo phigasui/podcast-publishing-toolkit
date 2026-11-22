@@ -381,6 +381,28 @@ def fetch_current_feed(config, local)
   end
 end
 
+def latest_pub_date(doc)
+  latest = nil
+  doc.root.elements.each('channel/item/pubDate') do |el|
+    t = begin
+      Time.rfc2822(el.text.to_s.strip)
+    rescue ArgumentError
+      nil
+    end
+    latest = t if t && (latest.nil? || t > latest)
+  end
+  latest
+end
+
+# 新規エピソードの pubDate が既存 feed の最新 pubDate より後になるよう start_date を繰り上げる。
+# start_date が古い・毎回同じだと、重複や並びの逆転が起きるため。
+def clamp_start_date(start_date_str, interval_days, latest)
+  start = Time.parse(start_date_str)
+  return start_date_str if latest.nil? || start > latest
+
+  (latest + (interval_days * 86_400)).iso8601
+end
+
 def compute_pub_date(start_date_str, interval_days, index)
   start_date = Time.parse(start_date_str)
   start_date + (interval_days * index * 86_400)
@@ -553,6 +575,11 @@ def run_publish(mp3_dir, config, options)
 
   local_feed = local_feed_path(options)
   feed = prepare_feed(config, local_feed)
+  adjusted = clamp_start_date(schedule[:start_date], schedule[:interval_days], latest_pub_date(feed[:doc]))
+  if adjusted != schedule[:start_date]
+    warn "Warning: start_date #{schedule[:start_date]} は既存 feed の最新 pubDate 以前のため #{adjusted} に繰り上げます。"
+    schedule = schedule.merge(start_date: adjusted)
+  end
   # nlm は遅く認証も要るので、JSON が揃っていれば呼ばない
   needs_notebooks = mp3_files.any? { |mp3| !File.exist?(PodcastToolkit::Agy.metadata_path(mp3)) }
   filename_to_notebook = needs_notebooks ? fetch_filename_to_notebook_id_map : {}
