@@ -71,6 +71,83 @@ class PublishToSpotifyTest < Minitest::Test
                  Time.parse(clamp_start_date('2026-01-01T09:00:00+09:00', 7, latest))
   end
 
+  # ---- 収録日ルール (収録日 + 7 日の次の火曜 07:00 JST) ----
+
+  def rec(date_time)
+    "カタルシス - #{date_time} JST～Recording.mp3"
+  end
+
+  def test_recording_time_from_filename
+    assert_equal Time.parse('2025-06-07T21:30:00+09:00'), recording_time_from_filename(rec('2025 06 07 21:30'))
+    assert_nil recording_time_from_filename('no-date.mp3')
+    assert_nil recording_time_from_filename(rec('2025 13 45 99:99'))
+    assert_nil recording_time_from_filename(rec('2025 02 31 21:30'))
+  end
+
+  # bytecafe-fm/feed#3 の既存 7 話 (#1..#7) の期待値
+  FEED3_EXPECTED = {
+    '2025 06 07 21:30' => 'Tue, 17 Jun 2025 07:00:00 +0900', # 土 → +7 土 → 火
+    '2025 05 31 21:30' => 'Tue, 10 Jun 2025 07:00:00 +0900',
+    '2025 05 24 21:30' => 'Tue, 03 Jun 2025 07:00:00 +0900',
+    '2025 05 10 21:30' => 'Tue, 20 May 2025 07:00:00 +0900',
+    '2025 04 26 21:30' => 'Tue, 06 May 2025 07:00:00 +0900',
+    '2025 04 20 21:30' => 'Tue, 29 Apr 2025 07:00:00 +0900', # 日 → +7 日 → 火
+    '2025 03 29 21:30' => 'Tue, 08 Apr 2025 07:00:00 +0900'
+  }.freeze
+
+  def test_rule_pub_date_matches_feed3_expectations
+    FEED3_EXPECTED.each do |recorded, expected|
+      t = recording_time_from_filename(rec(recorded))
+      assert_equal expected, rule_pub_date(t).rfc2822, recorded
+    end
+  end
+
+  def test_rule_pub_date_is_strictly_after_when_plus7_is_the_weekday
+    # 火曜収録 → +7 日も火曜 → 「その日より後」なので翌週火曜
+    t = Time.parse('2025-06-03T21:30:00+09:00')
+    assert_equal 'Tue, 17 Jun 2025 07:00:00 +0900', rule_pub_date(t).rfc2822
+  end
+
+  def test_rule_pub_date_uses_jst_date_for_utc_input
+    # UTC 2025-06-07 20:00 は JST 06-08 05:00 (日) → +7 日 06-15(日) → 06-17
+    assert_equal 'Tue, 17 Jun 2025 07:00:00 +0900', rule_pub_date(Time.utc(2025, 6, 7, 20, 0)).rfc2822
+  end
+
+  def test_build_publish_rule_overrides
+    rule = build_publish_rule({ 'schedule' => { 'publish_rule' => { 'offset_days' => 3, 'weekday' => 'fri', 'time' => '08:30' } } }, {})
+    assert_equal({ offset_days: 3, weekday: 5, hour: 8, min: 30 }, rule)
+    assert_equal 7, build_publish_rule({}, {})[:offset_days]
+    assert_equal 1, build_publish_rule({}, { weekday: 'Mon' })[:weekday]
+    assert_raises(ArgumentError) { build_publish_rule({}, { weekday: 'xyz' }) }
+    assert_raises(ArgumentError) { build_publish_rule({}, { publish_time: '7am' }) }
+    assert_raises(ArgumentError) { build_publish_rule({}, { publish_time: '25:00' }) }
+    assert_raises(ArgumentError) { build_publish_rule({}, { offset_days: '-1' }) }
+  end
+
+  def test_decide_pub_date_sources
+    rule = build_publish_rule({}, {})
+    base = { start_date: '2026-01-01T09:00:00+09:00', interval_days: 7, rule: rule, explicit_start: false }
+    t, src = decide_pub_date(rec('2025 06 07 21:30'), base, 3)
+    assert_equal [:rule, 'Tue, 17 Jun 2025 07:00:00 +0900'], [src, t.rfc2822]
+    t, src = decide_pub_date('nodate.mp3', base, 2)
+    assert_equal [:legacy, 'Thu, 15 Jan 2026 09:00:00 +0900'], [src, t.rfc2822]
+    assert_equal [nil, nil], decide_pub_date('nodate.mp3', base.merge(start_date: nil), 0)
+    t, src = decide_pub_date(rec('2025 06 07 21:30'), base.merge(explicit_start: true), 1)
+    assert_equal [:explicit, 'Thu, 08 Jan 2026 09:00:00 +0900'], [src, t.rfc2822]
+  end
+
+  def test_warn_pub_date_conflicts_warns_but_keeps_date
+    feed = { latest_pub_date: Time.parse('2025-06-17T07:00:00+09:00') }
+    episode = { pub_date: Time.parse('2025-06-17T07:00:00+09:00'), pub_date_source: :rule }
+    _out, err = capture_io { warn_pub_date_conflicts(episode, feed) }
+    assert_match(/既存 feed の最新/, err)
+    assert_equal Time.parse('2025-06-17T07:00:00+09:00'), episode[:pub_date]
+    later = { pub_date: Time.parse('2025-06-24T07:00:00+09:00'), pub_date_source: :rule }
+    _out, err = capture_io { warn_pub_date_conflicts(later, feed) }
+    assert_equal '', err
+    assert_equal later[:pub_date], feed[:latest_pub_date]
+  end
+
   def test_latest_pub_date_picks_max
     doc = REXML::Document.new('<rss><channel><item><pubDate>Thu, 01 Jan 2026 09:00:00 +0900</pubDate></item>' \
                               '<item><pubDate>Thu, 15 Jan 2026 09:00:00 +0900</pubDate></item>' \

@@ -18,8 +18,14 @@ existing_rss_url: "<https://anchor.fm/s/.../podcast.rss>"
 
 # 予約公開のデフォルト
 schedule:
-  # 通常モードで複数 MP3 をまとめて投入する際の最初のエピソードの公開日時
-  # 各エピソードはこの日時から `interval_days` ずつずらして配信されます。
-  # CLI で --start-date / --interval-days を渡すと上書きできます。
+  # 既定: 各エピソードの収録日（音声ファイル名の「YYYY MM DD HH:MM JST」）から
+  # 「収録日 + offset_days の次の weekday の time」で pubDate を決める。
+  # CLI の --offset-days / --weekday / --publish-time で上書きできる。
+  publish_rule:
+    offset_days: 7
+    weekday: tue   # sun mon tue wed thu fri sat
+    time: "07:00"  # JST
+  # 以下は従来方式。ファイル名から収録日を取れない MP3 のフォールバックに使う
+  # （CLI の --start-date を渡すと、全 MP3 をこの方式で決める）。
   start_date: "2026-05-15T07:00:00+09:00"
   interval_days: 7

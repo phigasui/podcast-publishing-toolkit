@@ -141,15 +141,25 @@ ruby publish_to_spotify.rb ./mastered
 - `feed.xml` に `<item>` を追加（最新エピソードが先頭になるよう既存 `<item>` の前に挿入）
 - 全件処理後に `feed.xml` を R2 に再アップロード
 
-予約公開（pubDate を未来日時にすると Spotify はその時刻まで配信を保留）は次のオプションで指定します。
+予約公開（pubDate を未来日時にすると Spotify はその時刻まで配信を保留）の日時は、既定では各話の収録日から決めます。
+
+- 収録日は音声ファイル名の `YYYY MM DD HH:MM JST`（例: `カタルシス - 2025 06 07 21:30 JST～Recording.mp3`）から取ります
+- ルール: 収録日 + 7 日の、その日より後の最初の火曜日の 07:00 +0900（例: 2025-06-07(土) → 06-17、2025-04-20(日) → 04-29。+7 日がちょうど火曜なら翌週の火曜）
+- 日数・曜日・時刻は `podcast.yml` の `schedule.publish_rule`（`offset_days` / `weekday` / `time`）か、`--offset-days` / `--weekday` / `--publish-time` で変えられます
+- 既存 feed の最新 pubDate 以前になる場合は警告を出すだけで、日付は変えません
+- ファイル名から収録日を取れない MP3 は、`podcast.yml` の `schedule.start_date` + `interval_days` × 連番にフォールバックします（警告つき）。`start_date` も無ければその MP3 は skip（failed）です。連番は追加した全エピソードで数えます（収録日ありの回も含む）
+
+```sh
+ruby publish_to_spotify.rb ./mastered --offset-days 7 --weekday tue --publish-time 07:00
+```
+
+従来方式（最初の日時 + 一定間隔）にしたいときは `--start-date` を明示します。収録日ルールより優先され、最初のエピソードが `--start-date`、以降は `--interval-days` 日ずつずれます。既存 feed の最新 pubDate 以前なら繰り上げます。
 
 ```sh
 ruby publish_to_spotify.rb ./mastered \
   --start-date 2026-05-15T07:00:00+09:00 \
   --interval-days 7
 ```
-
-複数 MP3 を投入する場合、最初のエピソードが `--start-date` の日時、以降は `--interval-days` 日ずつずれて配信されます。`--start-date` / `--interval-days` を省略した場合は `podcast.yml` の `schedule.start_date` / `schedule.interval_days` を使用します。
 
 `--dry-run` を付けるとアップロードや `feed.xml` 更新を行わず、追加予定のタイトル・公開日時・MP3 URL のみ表示します。
 
