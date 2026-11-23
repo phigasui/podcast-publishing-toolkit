@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'date'
 require 'erb'
 require 'fileutils'
 require 'json'
@@ -411,6 +412,76 @@ def compute_pub_date(start_date_str, interval_days, index)
   start_date + (interval_days * index * 86_400)
 end
 
+WEEKDAYS = %w[sun mon tue wed thu fri sat].freeze
+DEFAULT_PUBLISH_RULE = { offset_days: 7, weekday: 2, hour: 7, min: 0 }.freeze
+PUBLISH_UTC_OFFSET = '+09:00'
+# 例: "カタルシス - 2025 06 07 21:30 JST～Recording.mp3"
+RECORDING_TIME_PATTERN = /(?<!\d)(\d{4}) (\d{2}) (\d{2}) (\d{2}):(\d{2}) JST/
+
+# 音声ファイル名の収録日時 (JST) を返す。取れなければ nil。
+def recording_time_from_filename(filename)
+  m = RECORDING_TIME_PATTERN.match(filename.to_s)
+  return nil unless m
+
+  y, mo, d = m[1].to_i, m[2].to_i, m[3].to_i
+  return nil unless Date.valid_date?(y, mo, d)
+
+  Time.new(y, mo, d, m[4].to_i, m[5].to_i, 0, PUBLISH_UTC_OFFSET)
+rescue ArgumentError
+  nil
+end
+
+# 収録日 + offset_days の、その日より後の最初の weekday (0=日..6=土) の hour:min (+0900)。
+# 既定は「収録日 + 7 日の次の火曜 07:00」。+7 日がちょうど火曜なら翌週の火曜になる。
+def rule_pub_date(recorded_at, rule = DEFAULT_PUBLISH_RULE)
+  base = recorded_at.getlocal(PUBLISH_UTC_OFFSET).to_date + rule[:offset_days]
+  date = base + 1
+  date += 1 until date.wday == rule[:weekday]
+  Time.new(date.year, date.month, date.day, rule[:hour], rule[:min], 0, PUBLISH_UTC_OFFSET)
+end
+
+# 設定・CLI の公開ルール (weekday は "tue" など、time は "07:00") を内部表現にする。
+def build_publish_rule(config, options)
+  cfg = config.dig('schedule', 'publish_rule') || {}
+  weekday = options[:weekday] || cfg['weekday']
+  time = options[:publish_time] || cfg['time']
+  rule = DEFAULT_PUBLISH_RULE.dup
+  rule[:offset_days] = Integer(options[:offset_days] || cfg['offset_days'] || rule[:offset_days])
+  raise ArgumentError, "offset_days は 0 以上にしてください: #{rule[:offset_days]}" if rule[:offset_days].negative?
+  if weekday
+    idx = WEEKDAYS.index(weekday.to_s.downcase[0, 3])
+    raise ArgumentError, "weekday が不正です: #{weekday}" unless idx
+
+    rule[:weekday] = idx
+  end
+  if time
+    m = /\A(\d{1,2}):(\d{2})\z/.match(time.to_s)
+    unless m && m[1].to_i <= 23 && m[2].to_i <= 59
+      raise ArgumentError, "time は HH:MM (00:00-23:59、YAML ではクオート) で指定してください: #{time}"
+    end
+
+    rule[:hour] = m[1].to_i
+    rule[:min] = m[2].to_i
+  end
+  rule
+end
+
+# 1 話の pubDate を決める。[Time, 由来] を返し、決められなければ [nil, nil]。
+#   :rule     … 収録日 (ファイル名) からのルール
+#   :explicit … CLI の --start-date による従来方式 (明示指定なので収録日より優先)
+#   :legacy   … 収録日が取れないときの start_date + interval_days × index へのフォールバック
+def decide_pub_date(filename, schedule, index)
+  if schedule[:explicit_start]
+    return [compute_pub_date(schedule[:start_date], schedule[:interval_days], index), :explicit]
+  end
+
+  recorded = recording_time_from_filename(filename)
+  return [rule_pub_date(recorded, schedule[:rule]), :rule] if recorded
+  return [nil, nil] unless schedule[:start_date]
+
+  [compute_pub_date(schedule[:start_date], schedule[:interval_days], index), :legacy]
+end
+
 def upload_episode(mp3_path, mp3_key, config)
   r2_upload(mp3_path, mp3_key, config, content_type: 'audio/mpeg')
 end
@@ -418,11 +489,14 @@ end
 def resolve_schedule!(config, options)
   start_date = options[:start_date] || config.dig('schedule', 'start_date')
   interval_days = options[:interval_days] || config.dig('schedule', 'interval_days') || 7
-  unless start_date
-    warn 'Error: start_date is required (config.schedule.start_date or --start-date).'
+  begin
+    rule = build_publish_rule(config, options)
+  rescue ArgumentError => e
+    warn "Error: #{e.message}"
     exit 1
   end
-  { start_date: start_date, interval_days: interval_days }
+  { start_date: start_date, interval_days: interval_days, rule: rule,
+    explicit_start: !options[:start_date].nil? }
 end
 
 def find_mp3_files!(mp3_dir)
@@ -446,16 +520,29 @@ end
 # Assemble the fully-resolved fields for one episode. Pure aside from File.size,
 # so it is exercised directly by unit tests.
 def build_episode(mp3, filename, metadata, duration_sec, schedule, index, config)
+  pub_date, pub_date_source = decide_pub_date(filename, schedule, index)
   {
     title: metadata[:title],
     description: metadata[:description],
     guid: filename,
-    pub_date: compute_pub_date(schedule[:start_date], schedule[:interval_days], index),
+    pub_date: pub_date,
+    pub_date_source: pub_date_source,
     mp3_key: r2_key(config, filename),
     mp3_url: r2_public_url(config, filename),
     mp3_size: File.size(mp3),
     duration_sec: duration_sec
   }
+end
+
+# ルールの日付は黙って動かさない。既存回・今回の先行回と同時刻以前なら警告だけ出す。
+def warn_pub_date_conflicts(episode, feed)
+  latest = feed[:latest_pub_date]
+  pub = episode[:pub_date]
+  if latest && pub <= latest
+    warn "  WARN: pubDate #{pub.rfc2822} は既存 feed の最新 (#{latest.rfc2822}) 以前です。日付は変えません"
+  end
+  feed[:latest_pub_date] = pub if latest.nil? || pub > latest
+  warn "  WARN: pubDate は start_date からの従来方式 (#{episode[:pub_date_source]}) で決めました" if episode[:pub_date_source] == :legacy
 end
 
 def print_dry_run(episode)
@@ -506,14 +593,20 @@ def publish_one_episode(mp3, filename, feed, filename_to_notebook, schedule, ind
   end
 
   episode = build_episode(mp3, filename, metadata, duration_sec, schedule, index, config)
-
+  unless episode[:pub_date]
+    warn '  WARN: ファイル名から収録日を取れず start_date もないため pubDate を決められません。skipping'
+    return [:failed, false]
+  end
   if options[:dry_run]
+    warn_pub_date_conflicts(episode, feed)
     print_dry_run(episode)
     return [:added, false]
   end
 
   puts "  Uploading MP3 to #{episode[:mp3_key]} ..."
   return [:failed, false] unless upload_episode(mp3, episode[:mp3_key], config)
+
+  warn_pub_date_conflicts(episode, feed)
 
   append_item(
     feed[:doc],
@@ -578,10 +671,14 @@ def run_publish(mp3_dir, config, options)
 
   local_feed = local_feed_path(options)
   feed = prepare_feed(config, local_feed)
-  adjusted = clamp_start_date(schedule[:start_date], schedule[:interval_days], latest_pub_date(feed[:doc]))
-  if adjusted != schedule[:start_date]
-    warn "Warning: start_date #{schedule[:start_date]} は既存 feed の最新 pubDate 以前のため #{adjusted} に繰り上げます。"
-    schedule = schedule.merge(start_date: adjusted)
+  feed[:latest_pub_date] = latest_pub_date(feed[:doc])
+  # 混在時の繰り上げは従来方式の MP3 にだけ効く（ルールの日付は動かさない）
+  if schedule[:start_date] && (schedule[:explicit_start] || !mp3_files.all? { |m| recording_time_from_filename(File.basename(m)) })
+    adjusted = clamp_start_date(schedule[:start_date], schedule[:interval_days], feed[:latest_pub_date])
+    if adjusted != schedule[:start_date]
+      warn "Warning: start_date #{schedule[:start_date]} は既存 feed の最新 pubDate 以前のため #{adjusted} に繰り上げます。"
+      schedule = schedule.merge(start_date: adjusted)
+    end
   end
   # nlm は遅く認証も要るので、JSON が揃っていれば呼ばない
   needs_notebooks = mp3_files.any? { |mp3| !File.exist?(PodcastToolkit::Agy.metadata_path(mp3)) }
@@ -617,6 +714,12 @@ def parse_cli_args
       opts[:start_date] = args.shift
     when '--interval-days'
       opts[:interval_days] = args.shift.to_i
+    when '--offset-days'
+      opts[:offset_days] = args.shift
+    when '--weekday'
+      opts[:weekday] = args.shift
+    when '--publish-time'
+      opts[:publish_time] = args.shift
     when '--config'
       opts[:config_path] = args.shift
     when '--env'
@@ -649,8 +752,15 @@ def print_usage
       （無ければ NotebookLM の「#{PODCAST_NOTE_TITLE}」ノート）からタイトル・説明を読み、
       MP3 を R2 にアップロードして feed.xml に <item> を追加します。
 
-      --start-date    最初のエピソードの公開日時 (ISO8601)。省略時は podcast.yml の値。
-      --interval-days 連続投入時のエピソード間隔日数。省略時は podcast.yml の値か 7。
+      pubDate は既定で各話の収録日（ファイル名 "YYYY MM DD HH:MM JST"）から
+      「収録日 + 7 日の次の火曜 07:00 +0900」に決めます（既存回との前後は警告のみ）。
+      --offset-days   収録日からの日数。既定 7（podcast.yml schedule.publish_rule.offset_days）。
+      --weekday       公開曜日 (sun..sat)。既定 tue（schedule.publish_rule.weekday）。
+      --publish-time  公開時刻 HH:MM (JST)。既定 07:00（schedule.publish_rule.time）。
+      --start-date    従来方式を明示指定: 最初の公開日時 (ISO8601) から --interval-days ずつ。
+                      収録日ルールより優先。podcast.yml の start_date は、ファイル名から
+                      収録日が取れない MP3 のフォールバックにだけ使います。
+      --interval-days 従来方式の間隔日数。省略時は podcast.yml の値か 7。
       --dry-run       アップロードや feed.xml 更新を行わず内容を表示するのみ。
       --no-publish    MP3 アップロードとローカル feed.xml への追記まで行い、
                       feed.xml の R2 アップロードはスキップします (公開前レビュー用)。
