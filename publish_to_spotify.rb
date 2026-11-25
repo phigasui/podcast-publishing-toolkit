@@ -318,16 +318,28 @@ end
 
 # ---------- modes ----------
 
-# Resolve the local feed.xml path. Honors --feed; otherwise defaults to a path
-# next to this script rather than CWD-relative, so running from another
-# directory doesn't silently read/write a different feed.xml.
-def local_feed_path(options)
-  options[:feed_path] || File.join(__dir__, DEFAULT_LOCAL_FEED_PATH)
+# Resolve the local feed.xml path. Honors --feed; otherwise checks podcast.yml's
+# feed_path; otherwise defaults to a path next to this script rather than
+# CWD-relative, so running from another directory doesn't silently read/write a different feed.xml.
+def local_feed_path(options, config = nil, base_dir: __dir__)
+  if options[:feed_path] && !options[:feed_path].to_s.empty?
+    File.expand_path(options[:feed_path])
+  elsif config && config['feed_path'] && !config['feed_path'].to_s.empty?
+    raw_path = config['feed_path'].to_s
+    expanded = File.expand_path(raw_path, base_dir)
+    if !File.exist?(expanded) && raw_path.start_with?('..')
+      one_up = File.expand_path(File.join('..', raw_path), base_dir)
+      return one_up if File.exist?(one_up)
+    end
+    expanded
+  else
+    File.join(base_dir, DEFAULT_LOCAL_FEED_PATH)
+  end
 end
 
 def run_bootstrap(config, options)
   url = config['existing_rss_url']
-  local = local_feed_path(options)
+  local = local_feed_path(options, config)
   puts "Downloading existing RSS from #{url} ..."
   unless download_url(url, local)
     warn 'Bootstrap failed: could not download existing RSS.'
@@ -349,7 +361,7 @@ def run_bootstrap(config, options)
 end
 
 def run_publish_feed(config, options)
-  local = local_feed_path(options)
+  local = local_feed_path(options, config)
   unless File.file?(local)
     warn "Error: #{local} not found."
     warn 'Run a publish step (with --no-publish to stage) before --publish-feed.'
@@ -669,7 +681,7 @@ def run_publish(mp3_dir, config, options)
   schedule = resolve_schedule!(config, options)
   mp3_files = find_mp3_files!(mp3_dir)
 
-  local_feed = local_feed_path(options)
+  local_feed = local_feed_path(options, config)
   feed = prepare_feed(config, local_feed)
   feed[:latest_pub_date] = latest_pub_date(feed[:doc])
   # 混在時の繰り上げは従来方式の MP3 にだけ効く（ルールの日付は動かさない）
@@ -765,8 +777,8 @@ def print_usage
       --no-publish    MP3 アップロードとローカル feed.xml への追記まで行い、
                       feed.xml の R2 アップロードはスキップします (公開前レビュー用)。
                       レビュー・修正後に --publish-feed で公開してください。
-      --feed <path>   ローカル feed.xml のパス。省略時はスクリプトと同じ
-                      ディレクトリの feed.xml を使用します。
+      --feed <path>   ローカル feed.xml のパス。省略時は podcast.yml の feed_path、
+                      それも無ければスクリプトと同じディレクトリの feed.xml を使用します。
 
     Publish-feed mode:
       ローカルの feed.xml をそのまま R2 にアップロードして公開します。

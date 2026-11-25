@@ -38,6 +38,55 @@ class PublishToSpotifyTest < Minitest::Test
     assert_nil parse_metadata(nil)
   end
 
+  # ---- local_feed_path resolution ----
+
+  def test_local_feed_path_prefers_cli_options
+    opts = { feed_path: '/custom/path/feed.xml' }
+    cfg = { 'feed_path' => '../other/feed.xml' }
+    assert_equal '/custom/path/feed.xml', local_feed_path(opts, cfg)
+  end
+
+  def test_local_feed_path_falls_back_to_config
+    opts = {}
+    cfg = { 'feed_path' => 'relative/feed.xml' }
+    expected = File.expand_path('relative/feed.xml', File.expand_path('..', __dir__))
+    assert_equal expected, local_feed_path(opts, cfg)
+  end
+
+  def test_local_feed_path_resolves_existing_parent_relative_path
+    Dir.mktmpdir do |dir|
+      # dir/repo/script.rb から見て ../neighbor/feed.xml が実際は ../../neighbor/feed.xml にある場合
+      repo_dir = File.join(dir, 'sub', 'repo')
+      neighbor_dir = File.join(dir, 'neighbor')
+      FileUtils.mkdir_p(repo_dir)
+      FileUtils.mkdir_p(neighbor_dir)
+      target_file = File.join(neighbor_dir, 'feed.xml')
+      File.write(target_file, '<xml/>')
+
+      # repo_dir 基準で ../neighbor/feed.xml は存在しないが、../../neighbor/feed.xml は存在するケース
+      opts = {}
+      cfg = { 'feed_path' => '../neighbor/feed.xml' }
+
+      resolved = local_feed_path(opts, cfg, base_dir: repo_dir)
+      assert_equal target_file, resolved
+    end
+  end
+
+  def test_local_feed_path_empty_string_falls_back_to_default
+    opts = {}
+    cfg = { 'feed_path' => '' }
+    expected = File.join(File.expand_path('..', __dir__), DEFAULT_LOCAL_FEED_PATH)
+    assert_equal expected, local_feed_path(opts, cfg)
+  end
+
+  def test_local_feed_path_defaults_to_local_feed_xml
+    opts = {}
+    cfg = {}
+    expected = File.join(File.expand_path('..', __dir__), DEFAULT_LOCAL_FEED_PATH)
+    assert_equal expected, local_feed_path(opts, cfg)
+    assert_equal expected, local_feed_path(opts)
+  end
+
   # ---- duration & schedule ----
 
   def test_format_duration
